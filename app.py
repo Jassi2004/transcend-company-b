@@ -36,6 +36,9 @@ class FaultInput(BaseModel):
     model_config = ConfigDict(extra="forbid", populate_by_name=True)
     kind: Literal["none", "priority-inversion"]
     expected_fault: str | None = Field(default=None, alias="expectedFault")
+    expected_fault_id: str | None = Field(
+        default=None, alias="expectedFaultId", min_length=1, max_length=100
+    )
 
 
 def create_app(database_path=None, demo_faults=None, sandbox_token=None):
@@ -71,6 +74,7 @@ def create_app(database_path=None, demo_faults=None, sandbox_token=None):
                 );
                 CREATE TABLE IF NOT EXISTS settings(key TEXT PRIMARY KEY,value TEXT NOT NULL);
                 INSERT OR IGNORE INTO settings VALUES('fault','none');
+                INSERT OR IGNORE INTO settings VALUES('faultId','');
                 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY AUTOINCREMENT,
                     type TEXT NOT NULL,message TEXT NOT NULL,createdAt TEXT NOT NULL);
             """)
@@ -84,7 +88,13 @@ def create_app(database_path=None, demo_faults=None, sandbox_token=None):
             from urllib.parse import urlsplit
 
             origin = request.headers.get("origin")
-            if origin and urlsplit(origin).netloc != request.headers.get("host"):
+            try:
+                allowed_origin = not origin or urlsplit(origin).netloc == request.headers.get(
+                    "host"
+                )
+            except ValueError:
+                allowed_origin = False
+            if not allowed_origin:
                 return JSONResponse({"error": "Cross-origin changes are not allowed."}, 403)
             if "application/json" not in request.headers.get("content-type", ""):
                 return JSONResponse({"error": "Use application/json."}, 415)
@@ -120,6 +130,7 @@ def create_app(database_path=None, demo_faults=None, sandbox_token=None):
     def health():
         with database() as db:
             current = fault(db)
+            fault_id = db.execute("SELECT value FROM settings WHERE key='faultId'").fetchone()[0]
         return JSONResponse(
             {
                 "status": "healthy" if current == "none" else "degraded",
@@ -127,6 +138,7 @@ def create_app(database_path=None, demo_faults=None, sandbox_token=None):
                 "version": "1.0.0",
                 "database": "connected",
                 "fault": current,
+                "faultId": fault_id,
                 "timestamp": now(),
             },
             200 if current == "none" else 503,
@@ -234,7 +246,12 @@ def create_app(database_path=None, demo_faults=None, sandbox_token=None):
             db.execute("BEGIN IMMEDIATE")
             if body.expected_fault and fault(db) != body.expected_fault:
                 raise HTTPException(409, "The fault changed after the proposal was captured.")
+            current_id = db.execute("SELECT value FROM settings WHERE key='faultId'").fetchone()[0]
+            if body.expected_fault_id and current_id != body.expected_fault_id:
+                raise HTTPException(409, "The fault changed after the proposal was captured.")
+            next_fault_id = str(uuid.uuid4())
             db.execute("UPDATE settings SET value=? WHERE key='fault'", (body.kind,))
+            db.execute("UPDATE settings SET value=? WHERE key='faultId'", (next_fault_id,))
             # Reclassify open demo tickets after a rollback; never alter customer content.
             if body.kind == "none":
                 for row in db.execute(
@@ -251,7 +268,7 @@ def create_app(database_path=None, demo_faults=None, sandbox_token=None):
                 "INSERT INTO events(type,message,createdAt) VALUES(?,?,?)",
                 ("demo.fault", f"Demo fault changed to {body.kind}", now()),
             )
-        return {"fault": body.kind}
+        return {"fault": body.kind, "faultId": next_fault_id}
 
     app.mount("/static", StaticFiles(directory=STATIC), name="static")
 
