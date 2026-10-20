@@ -118,7 +118,7 @@ def create_app(database_path=None, demo_faults=None, sandbox_token=None):
 
     def classify(severity, current_fault):
         return (
-            "low" if severity == "critical" and current_fault != "priority-inversion" else severity
+            "low" if severity == "critical" and current_fault == "priority-inversion" else severity
         )
 
     def ticket_json(row):
