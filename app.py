@@ -136,6 +136,7 @@ def create_app(database_path=None, demo_faults=None, sandbox_token=None):
                 "status": "healthy" if current == "none" else "degraded",
                 "service": "company-b",
                 "version": "1.0.0",
+                "buildCommit": os.getenv("RENDER_GIT_COMMIT") or os.getenv("BUILD_COMMIT"),
                 "database": "connected",
                 "fault": current,
                 "faultId": fault_id,

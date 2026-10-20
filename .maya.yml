@@ -1,0 +1,5 @@
+version: 1
+staging_branch: main
+staging_environment: staging
+production_requires_approval: true
+max_repair_attempts: 3

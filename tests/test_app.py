@@ -23,6 +23,22 @@ def ticket():
     }
 
 
+def test_health_identifies_the_actual_render_revision(client, monkeypatch):
+    monkeypatch.setenv("BUILD_COMMIT", "a" * 40)
+    monkeypatch.setenv("RENDER_GIT_COMMIT", "b" * 40)
+    assert client.get("/api/health").json()["buildCommit"] == "b" * 40
+    monkeypatch.delenv("RENDER_GIT_COMMIT")
+    assert client.get("/api/health").json()["buildCommit"] == "a" * 40
+
+
+@pytest.mark.parametrize("severity", ["low", "normal", "high", "critical"])
+def test_healthy_priority_classification_preserves_customer_severity(client, severity):
+    assert client.get(f"/api/classify?severity={severity}").json() == {
+        "severity": severity,
+        "priority": severity,
+    }
+
+
 def test_critical_routing_and_idempotency(client):
     first = client.post("/api/tickets", json=ticket(), headers={"Idempotency-Key": "request-one"})
     assert first.status_code == 201
